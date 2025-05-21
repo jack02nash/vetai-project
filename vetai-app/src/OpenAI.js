@@ -1,6 +1,6 @@
 // OpenAI.js
 
-// Main function to call OpenAI chat completion API
+// Main function to call OpenAI chat completion API through our backend
 export const getOpenAIResponse = async (messagesOrUserMessage, systemPrompt = '', model = 'gpt-4') => {
   let messages = [];
 
@@ -13,27 +13,25 @@ export const getOpenAIResponse = async (messagesOrUserMessage, systemPrompt = ''
     messages.push({ role: 'user', content: messagesOrUserMessage });
   }
 
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+  const res = await fetch('https://vetai-project.onrender.com/api/chat', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${process.env.REACT_APP_OPENAI_API_KEY}`,
     },
     body: JSON.stringify({
-      model,          // Dynamic model selection
+      model,
       messages,
     }),
   });
 
   if (!res.ok) {
     const error = await res.text();
-    console.error('OpenAI Error:', error);
-    throw new Error('OpenAI API call failed');
+    console.error('API Error:', error);
+    throw new Error('Chat API call failed');
   }
 
   const data = await res.json();
-
-  return data.choices[0].message.content;
+  return data.response;
 };
 
 // Separate function to generate conversation titles using a faster model
@@ -50,26 +48,26 @@ Title:
   const response = await getOpenAIResponse([
     { role: 'system', content: 'You are an expert title generator for chat threads.' },
     { role: 'user', content: prompt }
-  ], '', 'gpt-3.5-turbo');  // Use gpt-3.5-turbo for faster title generation
+  ], '', 'gpt-3.5-turbo');
 
   return response.replace(/[".]/g, '').trim();
 }
+
 export async function* getOpenAIStream(messages) {
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+  const response = await fetch('https://vetai-project.onrender.com/api/chat/stream', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${process.env.REACT_APP_OPENAI_API_KEY}`,
     },
     body: JSON.stringify({
-      model: 'gpt-4o-mini', // or 'gpt-4-0613' or whichever you want
+      model: 'gpt-4',
       messages,
       stream: true,
     }),
   });
 
   if (!response.ok) {
-    throw new Error(`OpenAI API error: ${response.statusText}`);
+    throw new Error(`API error: ${response.statusText}`);
   }
 
   const reader = response.body.getReader();
@@ -81,11 +79,7 @@ export async function* getOpenAIStream(messages) {
     if (done) break;
 
     buffer += decoder.decode(value, { stream: true });
-
-    // Split the buffer by newlines because streaming data comes in lines
     const lines = buffer.split('\n');
-
-    // Keep incomplete line in the buffer
     buffer = lines.pop();
 
     for (const line of lines) {
