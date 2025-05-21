@@ -57,28 +57,36 @@ def chat_stream():
         
         if not data or "messages" not in data:
             logger.error("Missing messages in request")
-            return jsonify({"error": "Missing messages in request"}), 400
+            error_data = {"error": "Missing messages in request"}
+            return Response(f"data: {json.dumps(error_data)}\n\n", content_type='text/event-stream')
 
         if not client.api_key:
             logger.error("OpenAI API key not configured")
-            return jsonify({"error": "OpenAI API key not configured"}), 500
+            error_data = {"error": "OpenAI API key not configured"}
+            return Response(f"data: {json.dumps(error_data)}\n\n", content_type='text/event-stream')
 
         def generate():
             try:
                 response = client.chat.completions.create(
                     model=data.get("model", "gpt-4"),
                     messages=data["messages"],
-                    stream=True
+                    stream=True,
+                    max_tokens=2000  # Add a reasonable limit
                 )
 
                 for chunk in response:
-                    if chunk and chunk.choices and chunk.choices[0].delta.content:
-                        content = chunk.choices[0].delta.content
-                        # Properly escape content and format JSON
-                        response_data = {
-                            "choices": [{"delta": {"content": content}}]
-                        }
-                        yield f"data: {json.dumps(response_data)}\n\n"
+                    try:
+                        if chunk and chunk.choices and chunk.choices[0].delta.content:
+                            content = chunk.choices[0].delta.content
+                            response_data = {
+                                "choices": [{"delta": {"content": content}}]
+                            }
+                            yield f"data: {json.dumps(response_data)}\n\n"
+                    except Exception as chunk_error:
+                        logger.error(f"Error processing chunk: {str(chunk_error)}")
+                        error_data = {"error": f"Error processing response: {str(chunk_error)}"}
+                        yield f"data: {json.dumps(error_data)}\n\n"
+                        return
                 
                 yield "data: [DONE]\n\n"
             except Exception as e:
@@ -86,11 +94,18 @@ def chat_stream():
                 error_data = {"error": str(e)}
                 yield f"data: {json.dumps(error_data)}\n\n"
 
-        return Response(stream_with_context(generate()), content_type='text/event-stream')
+        return Response(
+            stream_with_context(generate()),
+            content_type='text/event-stream',
+            headers={
+                'Cache-Control': 'no-cache',
+                'X-Accel-Buffering': 'no'
+            }
+        )
     except Exception as e:
         logger.error(f"Error in stream endpoint: {str(e)}")
-        return jsonify({"error": str(e)}), 500
+        error_data = {"error": str(e)}
+        return Response(f"data: {json.dumps(error_data)}\n\n", content_type='text/event-stream')
 
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(debug=True, port=int(os.getenv("PORT", 5000)))

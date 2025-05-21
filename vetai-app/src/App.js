@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { generateConversationTitle } from './OpenAI';
 import { getOpenAIStream } from './OpenAI';
 import { auth } from './firebase';
@@ -7,7 +7,7 @@ import AuthForm from './components/AuthForm';
 import Sidebar from './components/Sidebar';
 import './App.css';
 import { db } from './firebase';
-import { collection, doc, setDoc, getDoc, Timestamp } from 'firebase/firestore';
+import { collection, doc, getDocs, getDoc, setDoc, Timestamp, query, orderBy, onSnapshot } from 'firebase/firestore';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Chart } from "react-google-charts";
@@ -25,7 +25,6 @@ const extractMemoryFromResponse = (text) => {
   return {};
 };
 
-
 function App() {
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState([]);
@@ -38,156 +37,282 @@ function App() {
   const [typingAIMessage, setTypingAIMessage] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [globalMemory, setGlobalMemory] = useState({});
-  const handleLogout = async () => {
-  try {
-    await signOut(auth);
-    setUser(null);
-  } catch (error) {
-    console.error("Logout failed:", error);
-  }
-};
-  const stripTrailingJSON = (text) => {
-  const jsonMatch = text.match(/\{[\s\S]*\}$/);
-  if (jsonMatch) {
-    return text.slice(0, jsonMatch.index).trim();
-  }
-  return text;
-};
-
-
 
   const inputRef = useRef(null);
   const chatEndRef = useRef(null);
-  // Try to parse chart JSON from message content
-const parseChartFromContent = (content) => {
-  const jsonMatch = content.match(/\{[\s\S]*\}$/);
-  if (!jsonMatch) return null;
 
-  try {
-    const chartData = JSON.parse(jsonMatch[0]);
-    if (chartData.type && Array.isArray(chartData.data)) {
-      return chartData;
+  // Function to load user's global memory
+  const loadGlobalMemory = async (userId) => {
+    try {
+      const profileRef = doc(db, 'users', userId, 'profile', 'memory');
+      const profileSnap = await getDoc(profileRef);
+      const loadedMemory = profileSnap.exists() ? profileSnap.data() : {};
+      console.log("🧠 Loaded Global Memory:", loadedMemory);
+      setGlobalMemory(loadedMemory);
+      return loadedMemory;
+    } catch (error) {
+      console.error("Error loading global memory:", error);
+      return {};
     }
-  } catch {
-    return null;
-  }
-  return null;
-};
+  };
 
+  // Function to load user's conversations
+  const loadConversations = async (userId) => {
+    try {
+      const convCol = collection(db, 'users', userId, 'conversations');
+      const convQuery = query(convCol, orderBy('updatedAt', 'desc'));
+      const convSnap = await getDocs(convQuery);
+      
+      const loadedConversations = convSnap.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
 
+      console.log("📝 Loaded Conversations:", loadedConversations);
+      setConversations(loadedConversations);
+
+      // Set active conversation if none is selected
+      if (!activeConversationId && loadedConversations.length > 0) {
+        const mostRecent = loadedConversations[0];
+        setActiveConversationId(mostRecent.id);
+        setMessages(mostRecent.messages || []);
+        setMemory(mostRecent.memory || {});
+      }
+
+      return loadedConversations;
+    } catch (error) {
+      console.error("Error loading conversations:", error);
+      return [];
+    }
+  };
+
+  // Effect for loading initial data
   useEffect(() => {
-  if (chatEndRef.current) {
-    chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
-  }
-}, [messages, typingAIMessage]);
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        console.log("👤 User logged in:", firebaseUser.uid);
+        setUser(firebaseUser);
+        setLoading(true);
 
+        try {
+          // Set up real-time listener for global memory
+          const profileRef = doc(db, 'users', firebaseUser.uid, 'profile', 'memory');
+          const unsubscribeMemory = onSnapshot(profileRef, (snapshot) => {
+            const loadedMemory = snapshot.exists() ? snapshot.data() : {};
+            console.log("🧠 Real-time Global Memory Update:", loadedMemory);
+            setGlobalMemory(loadedMemory);
+          });
 
+          // Set up real-time listener for conversations
+          const convCol = collection(db, 'users', firebaseUser.uid, 'conversations');
+          const convQuery = query(convCol, orderBy('updatedAt', 'desc'));
+          const unsubscribeConv = onSnapshot(convQuery, (snapshot) => {
+            const loadedConversations = snapshot.docs.map(doc => ({
+              id: doc.id,
+              ...doc.data()
+            }));
+            console.log("📝 Real-time Conversations Update:", loadedConversations);
+            setConversations(loadedConversations);
+
+            // Set active conversation if none is selected
+            if (!activeConversationId && loadedConversations.length > 0) {
+              const mostRecent = loadedConversations[0];
+              setActiveConversationId(mostRecent.id);
+              setMessages(mostRecent.messages || []);
+              setMemory(mostRecent.memory || {});
+            }
+          });
+
+          return () => {
+            unsubscribeMemory();
+            unsubscribeConv();
+          };
+        } catch (error) {
+          console.error("Error in initial data load:", error);
+        } finally {
+          setLoading(false);
+        }
+      } else {
+        console.log("👤 User logged out");
+        // Clear all state when user logs out
+        setUser(null);
+        setConversations([]);
+        setActiveConversationId(null);
+        setGlobalMemory({});
+        setMessages([]);
+        setMemory({});
+        setLoading(false);
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  // Effect for handling conversation changes
+  useEffect(() => {
+    if (!user?.uid || !activeConversationId) return;
+
+    console.log("🔄 Setting up listener for conversation:", activeConversationId);
+    
+    const convRef = doc(db, 'users', user.uid, 'conversations', activeConversationId);
+    const unsubscribe = onSnapshot(convRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        console.log("📥 Received conversation update:", data);
+        
+        setMessages(data.messages || []);
+        setMemory(data.memory || {});
+        
+        setConversations(prev => 
+          prev.map(conv => 
+            conv.id === activeConversationId 
+              ? { ...conv, ...data }
+              : conv
+          )
+        );
+      }
+    });
+
+    return () => {
+      console.log("🔄 Cleaning up conversation listener");
+      unsubscribe();
+    };
+  }, [user?.uid, activeConversationId]);
+
+  // Function to update global memory
+  const updateGlobalMemory = async (newFacts) => {
+    if (!user?.uid || !newFacts || Object.keys(newFacts).length === 0) return;
+
+    try {
+      const profileRef = doc(db, 'users', user.uid, 'profile', 'memory');
+      const currentMemorySnap = await getDoc(profileRef);
+      const currentMemory = currentMemorySnap.exists() ? currentMemorySnap.data() : {};
+      
+      // Merge new facts with existing memory
+      const updatedGlobalMemory = { ...currentMemory, ...newFacts };
+      console.log("🧠 Updating Global Memory:", {
+        current: currentMemory,
+        new: newFacts,
+        merged: updatedGlobalMemory
+      });
+
+      // Save to Firebase with merge option
+      await setDoc(profileRef, updatedGlobalMemory, { merge: true });
+      
+      // Update local state
+      setGlobalMemory(updatedGlobalMemory);
+    } catch (error) {
+      console.error("Error updating global memory:", error);
+    }
+  };
+
+  const handleNewConversation = async () => {
+    if (!user?.uid) return;
+
+    try {
+      const convCol = collection(db, 'users', user.uid, 'conversations');
+      const newConvDoc = doc(convCol);
+      const now = Timestamp.now();
+      const newConv = {
+        messages: [],
+        memory: {},
+        createdAt: now,
+        updatedAt: now,
+        title: "New Conversation",
+        lastMessage: ''
+      };
+
+      await setDoc(newConvDoc, newConv);
+      const createdConv = { id: newConvDoc.id, ...newConv };
+      
+      setActiveConversationId(createdConv.id);
+      setMessages([]);
+      setMemory({});
+      setConversations(prev => [createdConv, ...prev]);
+
+      console.log("📝 Created new conversation:", createdConv);
+    } catch (error) {
+      console.error("Error creating conversation:", error);
+    }
+  };
+
+  const handleLoadConversation = async (convId) => {
+    if (!user?.uid || convId === activeConversationId) return;
+
+    try {
+      const convRef = doc(db, 'users', user.uid, 'conversations', convId);
+      const convSnap = await getDoc(convRef);
+
+      if (convSnap.exists()) {
+        const data = { id: convId, ...convSnap.data() };
+        console.log("📝 Loading conversation:", data);
+        
+        setMessages(data.messages || []);
+        setMemory(data.memory || {});
+        setActiveConversationId(convId);
+      }
+    } catch (error) {
+      console.error("Error loading conversation:", error);
+    }
+  };
+
+  // Effect for auto-scrolling
+  useEffect(() => {
+    if (chatEndRef.current) {
+      chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages, typingAIMessage]);
+
+  // Effect for input focus
   useEffect(() => {
     if (inputRef.current) {
       inputRef.current.focus();
     }
   }, [user, messages]);
 
-  const createNewConversation = async (uid) => {
-    const convCol = collection(db, 'users', uid, 'conversations');
-    const newConvDoc = doc(convCol);
-    const now = Timestamp.now();
-    const newConv = {
-      messages: [],
-      memory: {},
-      createdAt: now,
-      updatedAt: now,
-      title: "New Conversation"
+  // Effect for saving on unload
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (messages.length > 0 && user?.uid && activeConversationId) {
+        void saveToFirebase(messages, memory);
+      }
     };
-    await setDoc(newConvDoc, newConv);
-    setConversations(prev => [{ id: newConvDoc.id, ...newConv }, ...prev]);
-    setActiveConversationId(newConvDoc.id);
-    setMessages([]);
-    setMemory({});
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [messages, memory, user?.uid, activeConversationId]);
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      setUser(null);
+    } catch (error) {
+      console.error("Logout failed:", error);
+    }
   };
 
-useEffect(() => {
-  setLoading(true);
-  // Set up Firebase auth listener
-  const unsubscribe = auth.onAuthStateChanged(async (firebaseUser) => {
-    if (firebaseUser) {
-      setUser(firebaseUser);
-      
-      try {
-        // Load user's conversations
-        const convCol = collection(db, 'users', firebaseUser.uid, 'conversations');
-        const convSnap = await getDoc(doc(convCol));
-        
-        if (convSnap.exists()) {
-          const convs = convSnap.data();
-          setConversations(Object.entries(convs).map(([id, data]) => ({
-            id,
-            ...data
-          })));
-        } else {
-          // Create initial conversation
-          const now = Timestamp.now();
-          const newConv = {
-            id: 'default-conversation',
-            messages: [],
-            memory: {},
-            createdAt: now,
-            updatedAt: now,
-            title: "New Conversation"
-          };
-          setConversations([newConv]);
-        }
-        
-        setActiveConversationId('default-conversation');
-        setMessages([]);
-        setMemory({});
-        setGlobalMemory({});
-      } catch (e) {
-        console.error("Error loading conversations:", e);
-      }
-    } else {
-      setUser(null);
-      setConversations([]);
-      setActiveConversationId(null);
+  const stripTrailingJSON = (text) => {
+    const jsonMatch = text.match(/\{[\s\S]*\}$/);
+    if (jsonMatch) {
+      return text.slice(0, jsonMatch.index).trim();
     }
-    setLoading(false);
-  });
+    return text;
+  };
 
-  return () => unsubscribe();
-}, []);
+  // Try to parse chart JSON from message content
+  const parseChartFromContent = (content) => {
+    const jsonMatch = content.match(/\{[\s\S]*\}$/);
+    if (!jsonMatch) return null;
 
-  useEffect(() => {
-    const saveConversation = async () => {
-      if (auth.currentUser && activeConversationId && messages.length > 0) {
-        const convRef = doc(db, 'users', auth.currentUser.uid, 'conversations', activeConversationId);
-        await setDoc(convRef, { messages, memory, updatedAt: Timestamp.now() }, { merge: true });
+    try {
+      const chartData = JSON.parse(jsonMatch[0]);
+      if (chartData.type && Array.isArray(chartData.data)) {
+        return chartData;
       }
-    };
-
-    window.addEventListener('beforeunload', saveConversation);
-    return () => window.removeEventListener('beforeunload', saveConversation);
-  }, [messages, memory, activeConversationId]);
-
-
-  const loadConversation = async (convId) => {
-    if (!user || convId === activeConversationId) return;
-
-    const convRef = doc(db, 'users', user.uid, 'conversations', convId);
-    const convSnap = await getDoc(convRef);
-
-    if (convSnap.exists()) {
-      const data = convSnap.data();
-      setActiveConversationId(convId);
-      setMessages(data.messages || []);
-      setMemory(data.memory || {});
-    } else {
-      const conv = conversations.find(c => c.id === convId);
-      if (conv) {
-        setActiveConversationId(convId);
-        setMessages(conv.messages || []);
-        setMemory(conv.memory || {});
-      }
+    } catch {
+      return null;
     }
+    return null;
   };
 
   const detectMemory = async (text) => {
@@ -200,217 +325,228 @@ useEffect(() => {
 
     if (JSON.stringify(updatedMemory) !== JSON.stringify(memory)) {
       setMemory(updatedMemory);
-      if (activeConversationId && user) {
-        await setDoc(doc(db, 'users', user.uid, 'conversations', activeConversationId), {
-          memory: updatedMemory,
-          updatedAt: Timestamp.now()
-        }, { merge: true });
-      }
+      await saveToFirebase(messages, updatedMemory);
     }
   };
 
-const detectGlobalMemory = async (text) => {
-  try {
-    const prompt = `
-You are a memory extraction agent. The following message was written by a user.
-Extract any useful long-term memory facts (like name, birthday, rank, financial goals, interests, family, location, etc) as a flat JSON object. Only include facts that are clearly stated. Do not make up anything.
+  const detectGlobalMemory = async (text) => {
+    try {
+      const prompt = `
+You are a memory extraction agent. Analyze the following message and extract any useful facts about the user.
+Focus on these categories:
+1. Personal Info: name, age, birthday, location, etc.
+2. Military Info: rank, branch, unit, deployment history, etc.
+3. Family: spouse, children, relatives, etc.
+4. Career: job, education, skills, etc.
+5. Financial: goals, income, expenses, investments, etc.
+6. Health: conditions, medications, concerns, etc.
+7. Preferences: interests, hobbies, likes/dislikes, etc.
+8. Goals: short-term and long-term objectives
 
 Message:
 """
 ${text}
 """
 
-Return only a valid JSON object.
-    `.trim();
-
-    const messagesForMemory = [
-      { role: "system", content: prompt },
-    ];
-
-    let result = "";
-    for await (const chunk of getOpenAIStream(messagesForMemory)) {
-      result += chunk;
-    }
-
-    // Remove markdown code block markers if they exist
-    const cleanJsonString = result.trim().replace(/^```json\s*/, '').replace(/\s*```$/, '');
-
-    const extracted = JSON.parse(cleanJsonString);
-
-    const updatedGlobalMemory = { ...globalMemory, ...extracted };
-    setGlobalMemory(updatedGlobalMemory);
-    console.log("🧠 Updated Global Memory:", updatedGlobalMemory);
-
-    if (user) {
-      const profileRef = doc(db, 'users', user.uid, 'profile', 'memory');
-      await setDoc(profileRef, updatedGlobalMemory, { merge: true });
-    }
-  } catch (err) {
-    console.error("Error extracting global memory:", err);
-  }
-};
-
-const sendMessage = async () => {
-  if (!input.trim() || sending) return;
-
-  try {
-    setSending(true);
-    const userMessage = { role: "user", content: input };
-    const updatedMessages = [...messages, userMessage];
-    setMessages(updatedMessages);
-    setInput('');
-
-    // Save conversation with user message
-    if (user && activeConversationId) {
-      const convRef = doc(db, "users", user.uid, "conversations", activeConversationId);
-      await setDoc(
-        convRef,
-        {
-          messages: updatedMessages,
-          updatedAt: Timestamp.now()
-        },
-        { merge: true }
-      );
-    }
-
-    // Your AI prompt including memory (local + global)
-    const systemPrompt = `
-You are VetAI, a smart, kind, funny, and deeply knowledgeable assistant for U.S. military personnel.
-
-Use the following memory about the user to personalize your answers:
-
-Long-term memory:
-${JSON.stringify(globalMemory, null, 2)}
-
-Conversation-specific memory:
-${JSON.stringify(memory, null, 2)}
-
-When you answer, always format your response to be **clear and easy to read**. Use:
-- Headings (like "## Summary", "### Steps", etc.)
-- Bullet points, numbered lists, and exmples where appropriate
-- Short paragraphs with explanations
-- Examples if it helps clarify
-
-If a visual (chart, graph, etc.) would help, append ONLY a raw JSON object **after all your text**, on a new line.
-
-DO NOT explain, describe, or preface the JSON in any way. DO NOT say "Here's a chart…" or "Below is JSON…". Just end with the JSON like this:
-
-{
-  "type": "BarChart",
-  "data": [
-    ["Category", "Amount"],
-    ["Rent", 1200],
-    ["Food", 600],
-    ["Savings", 300]
-  ],
-  "options": {
-    "title": "Monthly Expenses Breakdown"
-  }
-}
-
-✅ Final notes:
-- NO explanations before or after the JSON.
-- End your reply with the JSON only.
-
-After answering the user, check if any personal facts about the user have changed or new facts were shared (like age, location, marital status, goals, etc.).
-If so, return a JSON object with only those updated facts.
-If nothing new, return an empty JSON object "{}".
-
-First provide your structured and clear answer, then **append** the JSON object of updated facts at the end.
-
-Be concise but thorough. Help the user with financial, military, or life advice using their memory where relevant.
+Return ONLY a JSON object with the extracted facts. Only include clearly stated facts, never assume or infer. If no new facts are found, return empty object {}.
 `.trim();
 
-    const messagesForOpenAI = [
-      { role: "system", content: systemPrompt },
-      ...updatedMessages,
-    ];
+      const messagesForMemory = [
+        { role: "system", content: prompt },
+      ];
 
-    setIsTyping(true);
-    setTypingAIMessage("");
-
-    let streamedMessage = "";
-
-    for await (const chunk of getOpenAIStream(messagesForOpenAI)) {
-      streamedMessage += chunk;
-      setTypingAIMessage(streamedMessage);
-    }
-
-    setIsTyping(false);
-    setTypingAIMessage("");
-
-    // Extract updated memory facts from AI response
-    const updatedFacts = extractMemoryFromResponse(streamedMessage);
-
-    if (Object.keys(updatedFacts).length > 0) {
-      console.log("📥 New Memory Detected:", updatedFacts);
-
-      // Merge updated facts into local conversation memory
-      const newMemory = { ...memory, ...updatedFacts };
-      setMemory(newMemory);
-
-      // Merge updated facts into global memory
-      const newGlobalMemory = { ...globalMemory, ...updatedFacts };
-      setGlobalMemory(newGlobalMemory);
-
-      // Save updated global memory to Firestore user profile
-      if (user) {
-        const profileRef = doc(db, 'users', user.uid, 'profile', 'memory');
-        await setDoc(profileRef, newGlobalMemory, { merge: true });
-        console.log("🧠 Firebase global memory updated");
+      let result = "";
+      for await (const chunk of getOpenAIStream(messagesForMemory)) {
+        result += chunk;
       }
+
+      // Remove markdown code block markers if they exist
+      const cleanJsonString = result.trim().replace(/^```json\s*/, '').replace(/\s*```$/, '');
+
+      const extracted = JSON.parse(cleanJsonString);
+
+      // Only update memory if new facts were found
+      if (Object.keys(extracted).length > 0) {
+        const updatedGlobalMemory = { ...globalMemory, ...extracted };
+        setGlobalMemory(updatedGlobalMemory);
+        console.log("🧠 Updated Global Memory:", updatedGlobalMemory);
+
+        if (user) {
+          const profileRef = doc(db, 'users', user.uid, 'profile', 'memory');
+          await setDoc(profileRef, updatedGlobalMemory, { merge: true });
+        }
+      }
+    } catch (err) {
+      console.error("Error extracting global memory:", err);
+    }
+  };
+
+  // Function to save conversation to Firebase
+  const saveToFirebase = async (messages, memory, title = null) => {
+    if (!user?.uid || !activeConversationId || !db) {
+      console.error('Missing required parameters for saving to Firebase:', {
+        userId: user?.uid,
+        conversationId: activeConversationId,
+        dbInitialized: !!db
+      });
+      return false;
     }
 
-    // Remove JSON memory from AI message before showing it in chat UI
-    const cleanedResponse = streamedMessage.replace(/\{[\s\S]*\}$/, '').trim();
+    try {
+      const now = Timestamp.now();
+      const convRef = doc(db, 'users', user.uid, 'conversations', activeConversationId);
+      
+      // If no title is provided, try to generate one for new conversations
+      let updatedTitle = title;
+      if (!title && messages.length > 0) {
+        try {
+          updatedTitle = await generateConversationTitle(messages);
+        } catch (error) {
+          console.error('Error generating title:', error);
+          updatedTitle = "New Conversation";
+        }
+      }
+      
+      const conversationData = {
+        messages: messages || [],
+        memory: memory || {},
+        updatedAt: now,
+        title: updatedTitle || conversations.find(c => c.id === activeConversationId)?.title || "New Conversation",
+        lastMessage: messages?.[messages.length - 1]?.content || ''
+      };
 
-    // Add AI message without memory JSON appended to messages
-    const allMessages = [...updatedMessages, { role: "assistant", content: cleanedResponse }];
-    setMessages(allMessages);
+      console.log("💾 Saving conversation data:", {
+        conversationId: activeConversationId,
+        messageCount: messages.length,
+        memoryKeys: Object.keys(memory),
+        title: conversationData.title
+      });
 
-    // Save conversation with updated messages and updated local memory
-    if (user && activeConversationId) {
-      const convRef = doc(db, "users", user.uid, "conversations", activeConversationId);
-      await setDoc(
-        convRef,
-        {
-          messages: allMessages,
-          memory: { ...memory, ...updatedFacts },
-          updatedAt: Timestamp.now()
-        },
-        { merge: true }
-      );
-    }
-
-    // Update conversation title if needed (your existing code)
-    const currentConv = conversations.find((c) => c.id === activeConversationId);
-    const needsTitle = !currentConv?.title || currentConv.title === "New Conversation" || currentConv.title === "Untitled";
-
-    if (needsTitle && updatedMessages.length >= 2) {
-      const newTitle = await generateConversationTitle(updatedMessages);
-      await setDoc(doc(db, "users", user.uid, "conversations", activeConversationId), { title: newTitle }, { merge: true });
-
-      setConversations((prev) =>
-        prev.map((conv) =>
-          conv.id === activeConversationId ? { ...conv, title: newTitle } : conv
+      await setDoc(convRef, conversationData, { merge: true });
+      
+      // Update conversations list in state
+      setConversations(prev => 
+        prev.map(conv => 
+          conv.id === activeConversationId 
+            ? { ...conv, ...conversationData }
+            : conv
         )
       );
+      
+      return true;
+    } catch (error) {
+      console.error('Error saving to Firebase:', error);
+      return false;
     }
+  };
 
-    // Also update conversation memory state after merging
-    setMemory((prevMemory) => ({ ...prevMemory, ...updatedFacts }));
+  const handleSendMessage = async (e) => {
+    e.preventDefault();
+    if (!input.trim() || sending) return;
 
-    // Optionally detect any quick memory in the AI message (your existing function)
-    await detectMemory(streamedMessage);
-    detectGlobalMemory(input);
+    const userMessage = { role: 'user', content: input.trim() };
+    const updatedMessages = [...messages, userMessage];
+    
+    setInput('');
+    setSending(true);
+    setMessages(updatedMessages);
 
-  } catch (e) {
-    console.error(e);
-  } finally {
-    setSending(false);
-    if (inputRef.current) inputRef.current.focus();
-  }
-};
+    try {
+      // Save the user's message immediately
+      await saveToFirebase(updatedMessages, memory);
+
+      // Process memory updates
+      await detectMemory(input);
+      await detectGlobalMemory(input);
+
+      // Prepare system prompt with memory context
+      const systemPrompt = `You are VetAI, a helpful assistant focused on supporting veterans.
+
+IMPORTANT - Memory System:
+1. Global Memory (Facts known about the user across all conversations):
+${JSON.stringify(globalMemory, null, 2)}
+
+2. Current Conversation Memory (Context specific to this chat):
+${JSON.stringify(memory, null, 2)}
+
+Instructions for using memory:
+1. ALWAYS reference relevant facts from memory when responding
+2. If you notice any contradictions between global and conversation memory, prioritize the most recent information
+3. Show you remember previous interactions by referencing relevant details
+4. If the user mentions something that contradicts or updates existing memory, note it in your response
+
+When you answer:
+1. Format your response to be clear and easy to read using:
+   - Headings (## Summary, ### Steps, etc.)
+   - Bullet points and numbered lists
+   - Short, clear paragraphs
+   - Examples when helpful
+
+2. If relevant, include a visual chart by appending a JSON object in a separate message after your main response.
+
+Remember:
+- Be personable and reference past conversations
+- Use military context when appropriate
+- Keep responses concise but thorough
+- Help with financial, military, or life advice using their memory`.trim();
+
+      const messagesForOpenAI = [
+        { role: "system", content: systemPrompt },
+        ...updatedMessages,
+      ];
+
+      setIsTyping(true);
+      setTypingAIMessage("");
+
+      let streamedMessage = "";
+      let memoryUpdate = {};
+
+      for await (const chunk of getOpenAIStream(messagesForOpenAI)) {
+        // Check if the chunk contains a complete JSON object at the end
+        const jsonMatch = chunk.match(/\{[\s\S]*\}$/);
+        if (jsonMatch) {
+          try {
+            memoryUpdate = JSON.parse(jsonMatch[0]);
+            // Remove the JSON from the displayed message
+            streamedMessage = chunk.slice(0, jsonMatch.index).trim();
+          } catch (e) {
+            streamedMessage = chunk;
+          }
+        } else {
+          streamedMessage = chunk;
+        }
+        setTypingAIMessage(streamedMessage);
+      }
+
+      setIsTyping(false);
+      setTypingAIMessage("");
+
+      // Update memory if new facts were found
+      if (Object.keys(memoryUpdate).length > 0) {
+        const newMemory = { ...memory, ...memoryUpdate };
+        setMemory(newMemory);
+        await updateGlobalMemory(memoryUpdate);
+      }
+
+      // Save final conversation state with AI response
+      const allMessages = [...updatedMessages, { role: "assistant", content: streamedMessage }];
+      await saveToFirebase(allMessages, { ...memory, ...memoryUpdate });
+      setMessages(allMessages);
+
+    } catch (error) {
+      console.error('Error sending message:', error);
+      const errorMessage = {
+        role: "assistant",
+        content: "I apologize, but I encountered an error while processing your request. Please try again."
+      };
+      setMessages(prev => [...prev, errorMessage]);
+    } finally {
+      setIsTyping(false);
+      setSending(false);
+      setTypingAIMessage("");
+      if (inputRef.current) inputRef.current.focus();
+    }
+  };
 
   if (loading) {
     return (
@@ -431,92 +567,97 @@ Be concise but thorough. Help the user with financial, military, or life advice 
     );
   }
 
-return (
-  <div className="app">
-    {!user ? (
-      <AuthForm />
-    ) : (
-      <div className="app-container">
-        <Sidebar
-          conversations={conversations}
-          onSelectConversation={loadConversation}
-          onNewChat={() => createNewConversation(user.uid)}
-          selectedId={activeConversationId}
-          isLoading={loading}
-          onLogout={handleLogout}
-        />
-        <div className="main-content">
-          <div className="chat-container">
-            {messages.map((message, index) => {
-              const chartData = parseChartFromContent(message.content);
-              const cleanedContent = message.role === 'assistant'
-                ? stripTrailingJSON(message.content)
-                : message.content;
+  return (
+    <div className="app">
+      {!user ? (
+        <AuthForm />
+      ) : (
+        <div className="app-container">
+          <Sidebar
+            conversations={conversations}
+            onSelectConversation={handleLoadConversation}
+            onNewChat={handleNewConversation}
+            selectedId={activeConversationId}
+            isLoading={loading}
+            onLogout={handleLogout}
+          />
+          <div className="main-content">
+            <div className="chat-container">
+              {messages.map((message, index) => {
+                const chartData = parseChartFromContent(message.content);
+                const cleanedContent = message.role === 'assistant'
+                  ? stripTrailingJSON(message.content)
+                  : message.content;
 
-              return (
-                <div
-                  key={index}
-                  className={`message ${message.role}`}
-                >
-                  <strong>{message.role === 'user' ? 'You' : 'VetAI'}:</strong>
+                return (
+                  <div
+                    key={index}
+                    className={`message ${message.role}`}
+                  >
+                    <strong>{message.role === 'user' ? 'You' : 'VetAI'}:</strong>
+                    <div className="message-content">
+                      {message.role === 'assistant' ? (
+                        <>
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {cleanedContent || ''}
+                          </ReactMarkdown>
+                          {chartData && (
+                            <div className="chart-container">
+                              <Chart
+                                chartType={chartData.type}
+                                data={chartData.data}
+                                options={chartData.options || {}}
+                                width="100%"
+                                height="300px"
+                              />
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        cleanedContent
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+              {isTyping && (
+                <div className="message ai">
                   <div className="message-content">
-                    {message.role === 'assistant' ? (
-                      <>
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                          {cleanedContent || ''}
-                        </ReactMarkdown>
-                        {chartData && (
-                          <div className="chart-container">
-                            <Chart
-                              chartType={chartData.type}
-                              data={chartData.data}
-                              options={chartData.options || {}}
-                              width="100%"
-                              height="300px"
-                            />
-                          </div>
-                        )}
-                      </>
-                    ) : (
-                      cleanedContent
-                    )}
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {typingAIMessage || ''}
+                    </ReactMarkdown>
                   </div>
                 </div>
-              );
-            })}
-            {isTyping && (
-              <div className="message ai">
-                <div className="message-content">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {typingAIMessage || ''}
-                  </ReactMarkdown>
-                </div>
-              </div>
-            )}
-            <div ref={chatEndRef} />
-          </div>
-          <div className="input-container">
-            <input
-              ref={inputRef}
-              type="text"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && !sending && input.trim() && sendMessage()}
-              placeholder="Type your message..."
-              disabled={sending}
-            />
-            <button 
-              onClick={sendMessage} 
-              disabled={sending || !input.trim()}
-            >
-              {sending ? 'Sending...' : 'Send'}
-            </button>
+              )}
+              <div ref={chatEndRef} />
+            </div>
+            <div className="input-container">
+              <input
+                ref={inputRef}
+                type="text"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey && !sending && input.trim()) {
+                    e.preventDefault();
+                    handleSendMessage(e);
+                  }
+                }}
+                placeholder="Type your message..."
+                disabled={sending}
+              />
+              <button 
+                onClick={handleSendMessage}
+                disabled={sending || !input.trim()}
+              >
+                {sending ? 'Sending...' : 'Send'}
+              </button>
+            </div>
           </div>
         </div>
-      </div>
-    )}
-  </div>
-);
+      )}
+    </div>
+  );
 }
 
 export default App;

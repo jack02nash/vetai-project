@@ -1,16 +1,52 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+    
+    function hasValidSubscription() {
+      let userData = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      return userData.subscription.plan != 'free' && 
+             (userData.subscription.validUntil == null || 
+              userData.subscription.validUntil > request.time);
+    }
+
+    // User profiles
     match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read: if isOwner(userId);
+      allow create: if isSignedIn() && request.auth.uid == userId;
+      allow update: if isOwner(userId);
       
+      // User conversations
       match /conversations/{conversationId} {
-        allow read, write: if request.auth != null && request.auth.uid == userId;
+        allow read: if isOwner(userId);
+        allow write: if isOwner(userId);
       }
       
+      // User profile and settings
       match /profile/{document=**} {
-        allow read, write: if request.auth != null && request.auth.uid == userId;
+        allow read: if isOwner(userId);
+        allow write: if isOwner(userId);
       }
+      
+      // Subscription data
+      match /subscription/{document=**} {
+        allow read: if isOwner(userId);
+        // Only allow system to update subscription
+        allow write: if false;
+      }
+    }
+    
+    // Premium features (for future use)
+    match /premium/{feature} {
+      allow read: if isSignedIn() && hasValidSubscription();
+      allow write: if false;
     }
   }
 } 
