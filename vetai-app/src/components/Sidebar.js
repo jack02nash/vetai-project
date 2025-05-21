@@ -102,9 +102,9 @@ function Sidebar({
           <button 
             className="icon-button collapse-button"
             onClick={() => setIsCollapsed(false)}
-            aria-label="Open sidebar"
-            data-tooltip="Open sidebar"
-            data-shortcut="Ctrl O"
+            aria-label="Expand sidebar"
+            data-tooltip="Expand sidebar"
+            title="Expand sidebar"
           >
             {/* Using emoji in CSS */}
           </button>
@@ -116,7 +116,7 @@ function Sidebar({
               disabled={isLoading}
               aria-label="New chat"
               data-tooltip="New chat"
-              data-shortcut="Ctrl N"
+              title="New chat"
             >
               +
             </button>
@@ -141,8 +141,8 @@ function Sidebar({
                   className="icon-button search-icon"
                   onClick={() => setIsSearchExpanded(true)}
                   aria-label="Search conversations"
-                  data-tooltip="Search chats"
-                  data-shortcut="Ctrl K"
+                  data-tooltip="Search conversations"
+                  title="Search conversations"
                 >
                   🔍
                 </button>
@@ -152,9 +152,9 @@ function Sidebar({
             <button 
               className="icon-button collapse-button"
               onClick={() => setIsCollapsed(true)}
-              aria-label="Close sidebar"
-              data-tooltip="Close sidebar"
-              data-shortcut="Ctrl C"
+              aria-label="Collapse sidebar"
+              data-tooltip="Collapse sidebar"
+              title="Collapse sidebar"
             >
               {/* Using emoji in CSS */}
             </button>

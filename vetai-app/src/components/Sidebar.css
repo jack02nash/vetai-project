@@ -57,7 +57,7 @@
   justify-content: center;
   width: 24px;
   height: 24px;
-  color: black;
+  color: white;
   transition: opacity 0.2s ease;
   position: relative;
 }
@@ -66,47 +66,46 @@
   opacity: 0.7;
 }
 
+/* Base tooltip styles */
 .icon-button::after {
   content: attr(data-tooltip);
-  position: absolute;
-  background-color: rgba(26, 26, 26, 0.8);
+  position: fixed; /* Changed from absolute to fixed */
+  background-color: #000000;
   color: white;
-  padding: 6px 8px;
-  border-radius: 6px;
+  padding: 8px 12px;
+  border-radius: 4px;
   font-size: 13px;
   white-space: nowrap;
   opacity: 0;
   visibility: hidden;
-  transition: all 0.15s ease;
   z-index: 99999;
   pointer-events: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  min-width: 100%;
-  min-height: 100%;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+  transition: opacity 0.15s ease;
 }
 
-/* Use same positioning for all buttons */
-.new-chat-icon::after,
-.search-icon::after,
-.collapse-button::after,
-.sidebar.collapsed .collapse-button::after {
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-}
-
+/* Show tooltip on hover */
 .icon-button:hover::after {
   opacity: 1;
   visibility: visible;
 }
 
+/* Positioning for expanded sidebar */
+.sidebar:not(.collapsed) .icon-button::after {
+  transform: translate(30px, -50%);
+}
+
+/* Positioning for collapsed sidebar */
+.sidebar.collapsed .icon-button::after {
+  transform: translate(45px, -50%);
+}
+
+/* Ensure the tooltip is positioned relative to the button */
+.icon-button {
+  position: relative;
+}
+
+/* Remove any existing tooltip content rules that might interfere */
 .icon-button[data-shortcut]::after {
   content: attr(data-tooltip);
 }
