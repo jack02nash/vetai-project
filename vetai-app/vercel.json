@@ -1,5 +1,6 @@
 {
   "version": 2,
+  // Trigger new deployment
   "builds": [
     {
       "src": "package.json",
