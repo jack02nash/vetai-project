@@ -13,7 +13,7 @@ export const getOpenAIResponse = async (messagesOrUserMessage, systemPrompt = ''
     messages.push({ role: 'user', content: messagesOrUserMessage });
   }
 
-  const res = await fetch('https://vetai-jack02nash-86753093466344466737-git-main-vetais-projects.vercel.app/api/chat', {
+  const res = await fetch('https://vetai-backend.onrender.com/api/chat', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -54,7 +54,7 @@ Title:
 }
 
 export async function* getOpenAIStream(messages) {
-  const response = await fetch('https://vetai-jack02nash-86753093466344466737-git-main-vetais-projects.vercel.app/api/chat/stream', {
+  const response = await fetch('https://vetai-backend.onrender.com/api/chat/stream', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
