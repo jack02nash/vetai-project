@@ -1,9 +1,5 @@
 from flask import Flask, request, jsonify, Response, stream_with_context
 from flask_cors import CORS
-import matplotlib.pyplot as plt
-import pandas as pd
-import io
-import base64
 import os
 from dotenv import load_dotenv
 import openai
@@ -88,18 +84,6 @@ def chat_stream():
     except Exception as e:
         logger.error(f"Error in stream endpoint: {str(e)}")
         return jsonify({"error": str(e)}), 500
-
-@app.route("/generate-chart", methods=["POST"])
-def generate_chart():
-    data = request.json
-    logger.info(f"Received chart data: {data}")
-
-    if not data or "values" not in data:
-        logger.error("Missing values in chart request")
-        return jsonify({"error": "Missing 'values' in request"}), 400
-
-    df = pd.DataFrame(data["values"], columns=["Label", "Value"])
-    ...
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
