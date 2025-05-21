@@ -2,7 +2,7 @@ from flask import Flask, request, jsonify, Response, stream_with_context
 from flask_cors import CORS
 import os
 from dotenv import load_dotenv
-import openai
+from openai import OpenAI
 import logging
 import json
 
@@ -16,8 +16,8 @@ app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
 # Configure OpenAI
-openai.api_key = os.getenv("OPENAI_API_KEY")
-if not openai.api_key:
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+if not client.api_key:
     logger.error("OpenAI API key not found in environment variables!")
 
 @app.route("/")
@@ -34,11 +34,11 @@ def chat():
             logger.error("Missing messages in request")
             return jsonify({"error": "Missing messages in request"}), 400
 
-        if not openai.api_key:
+        if not client.api_key:
             logger.error("OpenAI API key not configured")
             return jsonify({"error": "OpenAI API key not configured"}), 500
 
-        response = openai.ChatCompletion.create(
+        response = client.chat.completions.create(
             model=data.get("model", "gpt-4"),
             messages=data["messages"]
         )
@@ -59,20 +59,20 @@ def chat_stream():
             logger.error("Missing messages in request")
             return jsonify({"error": "Missing messages in request"}), 400
 
-        if not openai.api_key:
+        if not client.api_key:
             logger.error("OpenAI API key not configured")
             return jsonify({"error": "OpenAI API key not configured"}), 500
 
         def generate():
             try:
-                response = openai.ChatCompletion.create(
+                response = client.chat.completions.create(
                     model=data.get("model", "gpt-4"),
                     messages=data["messages"],
                     stream=True
                 )
 
                 for chunk in response:
-                    if chunk and chunk.choices and chunk.choices[0].delta.get("content"):
+                    if chunk and chunk.choices and chunk.choices[0].delta.content:
                         content = chunk.choices[0].delta.content
                         # Properly escape content and format JSON
                         response_data = {
