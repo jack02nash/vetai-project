@@ -7,7 +7,7 @@ import AuthForm from './components/AuthForm';
 import Sidebar from './components/Sidebar';
 import './App.css';
 import { db } from './firebase';
-import { collection, doc, setDoc, getDoc, getDocs, query, orderBy } from 'firebase/firestore';
+import { collection, doc, setDoc, getDoc } from 'firebase/firestore';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Chart } from "react-google-charts";
@@ -53,8 +53,6 @@ function App() {
   }
   return text;
 };
-  const truncate = (str, max = 30) =>
-    str.length > max ? str.slice(0, max) + "…" : str;
 
 
 
@@ -109,49 +107,51 @@ const parseChartFromContent = (content) => {
 
 useEffect(() => {
   setLoading(true);
-  // Auto-login with your credentials
-  const autoLogin = async () => {
-    try {
-      // Set a mock user object with your information
-      const mockUser = {
-        uid: 'your-user-id',
-        email: 'your-email@example.com'
-      };
-      setUser(mockUser);
-
-      // Create a mock Timestamp-like object
-      const mockTimestamp = {
-        toDate: () => new Date(),
-        seconds: Math.floor(Date.now() / 1000),
-        nanoseconds: 0
-      };
-
-      // Load conversations with proper timestamp
-      const convs = [
-        {
-          id: 'default-conversation',
-          messages: [],
-          memory: {},
-          createdAt: mockTimestamp,
-          updatedAt: mockTimestamp,
-          title: "New Conversation"
+  // Set up Firebase auth listener
+  const unsubscribe = auth.onAuthStateChanged(async (firebaseUser) => {
+    if (firebaseUser) {
+      setUser(firebaseUser);
+      
+      try {
+        // Load user's conversations
+        const convCol = collection(db, 'users', firebaseUser.uid, 'conversations');
+        const convSnap = await getDoc(doc(convCol));
+        
+        if (convSnap.exists()) {
+          const convs = convSnap.data();
+          setConversations(Object.entries(convs).map(([id, data]) => ({
+            id,
+            ...data
+          })));
+        } else {
+          // Create initial conversation
+          const newConv = {
+            id: 'default-conversation',
+            messages: [],
+            memory: {},
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            title: "New Conversation"
+          };
+          setConversations([newConv]);
         }
-      ];
-
-      setConversations(convs);
-      setActiveConversationId('default-conversation');
-      setMessages([]);
-      setMemory({});
-      setGlobalMemory({});
-      setLoading(false);
-    } catch (e) {
-      console.error(e);
-      setLoading(false);
+        
+        setActiveConversationId('default-conversation');
+        setMessages([]);
+        setMemory({});
+        setGlobalMemory({});
+      } catch (e) {
+        console.error("Error loading conversations:", e);
+      }
+    } else {
+      setUser(null);
+      setConversations([]);
+      setActiveConversationId(null);
     }
-  };
+    setLoading(false);
+  });
 
-  autoLogin();
-  return () => {};
+  return () => unsubscribe();
 }, []);
 
   useEffect(() => {
