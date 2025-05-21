@@ -7,7 +7,7 @@ import AuthForm from './components/AuthForm';
 import Sidebar from './components/Sidebar';
 import './App.css';
 import { db } from './firebase';
-import { collection, doc, setDoc, getDoc } from 'firebase/firestore';
+import { collection, doc, setDoc, getDoc, Timestamp } from 'firebase/firestore';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Chart } from "react-google-charts";
@@ -91,11 +91,12 @@ const parseChartFromContent = (content) => {
   const createNewConversation = async (uid) => {
     const convCol = collection(db, 'users', uid, 'conversations');
     const newConvDoc = doc(convCol);
+    const now = Timestamp.now();
     const newConv = {
       messages: [],
       memory: {},
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: now,
+      updatedAt: now,
       title: "New Conversation"
     };
     await setDoc(newConvDoc, newConv);
@@ -125,12 +126,13 @@ useEffect(() => {
           })));
         } else {
           // Create initial conversation
+          const now = Timestamp.now();
           const newConv = {
             id: 'default-conversation',
             messages: [],
             memory: {},
-            createdAt: new Date(),
-            updatedAt: new Date(),
+            createdAt: now,
+            updatedAt: now,
             title: "New Conversation"
           };
           setConversations([newConv]);
@@ -158,7 +160,7 @@ useEffect(() => {
     const saveConversation = async () => {
       if (auth.currentUser && activeConversationId && messages.length > 0) {
         const convRef = doc(db, 'users', auth.currentUser.uid, 'conversations', activeConversationId);
-        await setDoc(convRef, { messages, memory, updatedAt: new Date() }, { merge: true });
+        await setDoc(convRef, { messages, memory, updatedAt: Timestamp.now() }, { merge: true });
       }
     };
 
@@ -201,7 +203,7 @@ useEffect(() => {
       if (activeConversationId && user) {
         await setDoc(doc(db, 'users', user.uid, 'conversations', activeConversationId), {
           memory: updatedMemory,
-          updatedAt: new Date()
+          updatedAt: Timestamp.now()
         }, { merge: true });
       }
     }
@@ -251,12 +253,25 @@ Return only a valid JSON object.
 const sendMessage = async () => {
   if (!input.trim() || sending) return;
 
-  setSending(true);
   try {
-    const newMessage = { role: "user", content: input };
-    const updatedMessages = [...messages, newMessage];
+    setSending(true);
+    const userMessage = { role: "user", content: input };
+    const updatedMessages = [...messages, userMessage];
     setMessages(updatedMessages);
-    setInput("");
+    setInput('');
+
+    // Save conversation with user message
+    if (user && activeConversationId) {
+      const convRef = doc(db, "users", user.uid, "conversations", activeConversationId);
+      await setDoc(
+        convRef,
+        {
+          messages: updatedMessages,
+          updatedAt: Timestamp.now()
+        },
+        { merge: true }
+      );
+    }
 
     // Your AI prompt including memory (local + global)
     const systemPrompt = `
@@ -361,7 +376,7 @@ Be concise but thorough. Help the user with financial, military, or life advice 
         {
           messages: allMessages,
           memory: { ...memory, ...updatedFacts },
-          updatedAt: new Date(),
+          updatedAt: Timestamp.now()
         },
         { merge: true }
       );

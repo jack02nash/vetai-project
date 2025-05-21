@@ -10,10 +10,18 @@ function groupConversationsByDate(conversations) {
   yesterday.setDate(yesterday.getDate() - 1);
 
   conversations.forEach(chat => {
-    const date = new Date(chat.updatedAt?.toDate() || chat.createdAt?.toDate());
-    let groupKey;
+    // Handle both Firestore Timestamp and regular Date objects
+    let date;
+    if (chat.updatedAt?.toDate) {
+      date = chat.updatedAt.toDate();
+    } else if (chat.createdAt?.toDate) {
+      date = chat.createdAt.toDate();
+    } else {
+      date = chat.updatedAt || chat.createdAt || new Date();
+    }
 
-    if (isNaN(date)) {
+    let groupKey;
+    if (!(date instanceof Date) || isNaN(date)) {
       groupKey = 'Undated';
     } else if (date.toDateString() === today.toDateString()) {
       groupKey = 'Today';
@@ -36,8 +44,12 @@ function groupConversationsByDate(conversations) {
   // Sort conversations within each group by date (most recent first)
   Object.keys(groups).forEach(key => {
     groups[key].sort((a, b) => {
-      const dateA = new Date(a.updatedAt?.toDate() || a.createdAt?.toDate());
-      const dateB = new Date(b.updatedAt?.toDate() || b.createdAt?.toDate());
+      let dateA = a.updatedAt?.toDate?.() || a.createdAt?.toDate?.() || a.updatedAt || a.createdAt || new Date();
+      let dateB = b.updatedAt?.toDate?.() || b.createdAt?.toDate?.() || b.updatedAt || b.createdAt || new Date();
+      
+      if (!(dateA instanceof Date)) dateA = new Date(dateA);
+      if (!(dateB instanceof Date)) dateB = new Date(dateB);
+      
       return dateB - dateA;
     });
   });
