@@ -1,0 +1,47 @@
+/* src/components/ChatWindow.css */
+.chat-window {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: white;
+}
+
+.chat-messages {
+  flex: 1;
+  padding: 20px;
+  overflow-y: auto;
+}
+
+.message {
+  max-width: 80%;
+  margin-bottom: 10px;
+  padding: 10px;
+  border-radius: 8px;
+  line-height: 1.5;
+}
+
+.message.user {
+  background-color: #DCF8C6;
+  align-self: flex-end;
+}
+
+.message.assistant {
+  background-color: #F1F0F0;
+  align-self: flex-start;
+}
+
+.chat-input-form {
+  display: flex;
+  border-top: 1px solid #ccc;
+  padding: 10px;
+}
+
+.chat-input-form input {
+  flex: 1;
+  padding: 10px;
+  font-size: 1rem;
+}
+
+.chat-input-form button {
+  padding: 10px;
+}
