@@ -11,8 +11,5 @@
       "src": "/(.*)",
       "dest": "/"
     }
-  ],
-  "env": {
-    "REACT_APP_API_URL": "@backend_url"
-  }
+  ]
 } 
