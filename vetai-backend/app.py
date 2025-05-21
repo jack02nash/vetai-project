@@ -4,6 +4,7 @@ import os
 from dotenv import load_dotenv
 import openai
 import logging
+import json
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -73,12 +74,17 @@ def chat_stream():
                 for chunk in response:
                     if chunk and chunk.choices and chunk.choices[0].delta.get("content"):
                         content = chunk.choices[0].delta.content
-                        yield f"data: {{'choices': [{{'delta': {{'content': '{content}' }}}}]}}\n\n"
+                        # Properly escape content and format JSON
+                        response_data = {
+                            "choices": [{"delta": {"content": content}}]
+                        }
+                        yield f"data: {json.dumps(response_data)}\n\n"
                 
                 yield "data: [DONE]\n\n"
             except Exception as e:
                 logger.error(f"Error in stream generation: {str(e)}")
-                yield f"data: {{'error': '{str(e)}'}}\n\n"
+                error_data = {"error": str(e)}
+                yield f"data: {json.dumps(error_data)}\n\n"
 
         return Response(stream_with_context(generate()), content_type='text/event-stream')
     except Exception as e:
