@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { generateConversationTitle } from './OpenAI';
 import { getOpenAIStream } from './OpenAI';
 import { auth } from './firebase';
@@ -85,6 +85,91 @@ function App() {
       return [];
     }
   };
+
+  // Function to save conversation to Firebase
+  const saveToFirebase = useCallback(async (messages, memory, title = null) => {
+    if (!user?.uid || !activeConversationId || !db) {
+      console.error('Missing required parameters for saving to Firebase:', {
+        userId: user?.uid,
+        conversationId: activeConversationId,
+        dbInitialized: !!db
+      });
+      return false;
+    }
+
+    try {
+      const now = Timestamp.now();
+      const convRef = doc(db, 'users', user.uid, 'conversations', activeConversationId);
+      
+      // If no title is provided, try to generate one for new conversations
+      let updatedTitle = title;
+      if (!title && messages.length > 0) {
+        try {
+          updatedTitle = await generateConversationTitle(messages);
+        } catch (error) {
+          console.error('Error generating title:', error);
+          updatedTitle = "New Conversation";
+        }
+      }
+      
+      const conversationData = {
+        messages: messages || [],
+        memory: memory || {},
+        updatedAt: now,
+        title: updatedTitle || conversations.find(c => c.id === activeConversationId)?.title || "New Conversation",
+        lastMessage: messages?.[messages.length - 1]?.content || ''
+      };
+
+      console.log("💾 Saving conversation data:", {
+        conversationId: activeConversationId,
+        messageCount: messages.length,
+        memoryKeys: Object.keys(memory),
+        title: conversationData.title
+      });
+
+      await setDoc(convRef, conversationData, { merge: true });
+      
+      // Update conversations list in state
+      setConversations(prev => 
+        prev.map(conv => 
+          conv.id === activeConversationId 
+            ? { ...conv, ...conversationData }
+            : conv
+        )
+      );
+      
+      return true;
+    } catch (error) {
+      console.error('Error saving to Firebase:', error);
+      return false;
+    }
+  }, [user?.uid, activeConversationId, conversations]);
+
+  // Effect for auto-scrolling
+  useEffect(() => {
+    if (chatEndRef.current) {
+      chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages, typingAIMessage]);
+
+  // Effect for input focus
+  useEffect(() => {
+    if (inputRef.current) {
+      inputRef.current.focus();
+    }
+  }, [user, messages]);
+
+  // Effect for saving on unload
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (messages.length > 0 && user?.uid && activeConversationId) {
+        void saveToFirebase(messages, memory);
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [messages, memory, user?.uid, activeConversationId, saveToFirebase]);
 
   // Effect for loading initial data
   useEffect(() => {
@@ -256,32 +341,6 @@ function App() {
     }
   };
 
-  // Effect for auto-scrolling
-  useEffect(() => {
-    if (chatEndRef.current) {
-      chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [messages, typingAIMessage]);
-
-  // Effect for input focus
-  useEffect(() => {
-    if (inputRef.current) {
-      inputRef.current.focus();
-    }
-  }, [user, messages]);
-
-  // Effect for saving on unload
-  useEffect(() => {
-    const handleBeforeUnload = () => {
-      if (messages.length > 0 && user?.uid && activeConversationId) {
-        void saveToFirebase(messages, memory);
-      }
-    };
-
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [messages, memory, user?.uid, activeConversationId, saveToFirebase]);
-
   const handleLogout = async () => {
     try {
       await signOut(auth);
@@ -378,65 +437,6 @@ Return ONLY a JSON object with the extracted facts. Only include clearly stated 
       }
     } catch (err) {
       console.error("Error extracting global memory:", err);
-    }
-  };
-
-  // Function to save conversation to Firebase
-  const saveToFirebase = async (messages, memory, title = null) => {
-    if (!user?.uid || !activeConversationId || !db) {
-      console.error('Missing required parameters for saving to Firebase:', {
-        userId: user?.uid,
-        conversationId: activeConversationId,
-        dbInitialized: !!db
-      });
-      return false;
-    }
-
-    try {
-      const now = Timestamp.now();
-      const convRef = doc(db, 'users', user.uid, 'conversations', activeConversationId);
-      
-      // If no title is provided, try to generate one for new conversations
-      let updatedTitle = title;
-      if (!title && messages.length > 0) {
-        try {
-          updatedTitle = await generateConversationTitle(messages);
-        } catch (error) {
-          console.error('Error generating title:', error);
-          updatedTitle = "New Conversation";
-        }
-      }
-      
-      const conversationData = {
-        messages: messages || [],
-        memory: memory || {},
-        updatedAt: now,
-        title: updatedTitle || conversations.find(c => c.id === activeConversationId)?.title || "New Conversation",
-        lastMessage: messages?.[messages.length - 1]?.content || ''
-      };
-
-      console.log("💾 Saving conversation data:", {
-        conversationId: activeConversationId,
-        messageCount: messages.length,
-        memoryKeys: Object.keys(memory),
-        title: conversationData.title
-      });
-
-      await setDoc(convRef, conversationData, { merge: true });
-      
-      // Update conversations list in state
-      setConversations(prev => 
-        prev.map(conv => 
-          conv.id === activeConversationId 
-            ? { ...conv, ...conversationData }
-            : conv
-        )
-      );
-      
-      return true;
-    } catch (error) {
-      console.error('Error saving to Firebase:', error);
-      return false;
     }
   };
 
