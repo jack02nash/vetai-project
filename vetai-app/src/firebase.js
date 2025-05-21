@@ -4,13 +4,13 @@ import { getFirestore } from "firebase/firestore";
 
 const firebaseConfig = {
   apiKey: process.env.REACT_APP_FIREBASE_API_KEY,
-  authDomain: "vet-ai-58f03.firebaseapp.com",
-  databaseURL: "https://vet-ai-58f03-default-rtdb.firebaseio.com",
-  projectId: "vet-ai-58f03",
-  storageBucket: "vet-ai-58f03.appspot.com",
-  messagingSenderId: "108297516558",
-  appId: "1:108297516558:web:7f784b2ebba4d572206e5f",
-  measurementId: "G-C6R1Y7CKWD"
+  authDomain: process.env.REACT_APP_FIREBASE_AUTH_DOMAIN,
+  databaseURL: process.env.REACT_APP_FIREBASE_DATABASE_URL,
+  projectId: process.env.REACT_APP_FIREBASE_PROJECT_ID,
+  storageBucket: process.env.REACT_APP_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.REACT_APP_FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.REACT_APP_FIREBASE_APP_ID,
+  measurementId: process.env.REACT_APP_FIREBASE_MEASUREMENT_ID
 };
 
 const app = initializeApp(firebaseConfig);
