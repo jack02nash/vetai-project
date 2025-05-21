@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { generateConversationTitle } from './OpenAI';
 import { getOpenAIStream } from './OpenAI';
 import { auth } from './firebase';
@@ -146,7 +146,7 @@ function App() {
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [activeConversationId]);
 
   // Effect for handling conversation changes
   useEffect(() => {
@@ -280,7 +280,7 @@ function App() {
 
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [messages, memory, user?.uid, activeConversationId]);
+  }, [messages, memory, user?.uid, activeConversationId, saveToFirebase]);
 
   const handleLogout = async () => {
     try {
