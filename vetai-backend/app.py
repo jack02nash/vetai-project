@@ -108,4 +108,5 @@ def chat_stream():
         return Response(f"data: {json.dumps(error_data)}\n\n", content_type='text/event-stream')
 
 if __name__ == "__main__":
-    app.run(debug=True, port=int(os.getenv("PORT", 5000)))
+    port = int(os.getenv("PORT", 10000))
+    app.run(host="0.0.0.0", port=port, debug=False)
