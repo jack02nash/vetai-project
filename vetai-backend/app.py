@@ -13,17 +13,25 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 app = Flask(__name__)
+
+# Configure CORS with all necessary headers
 CORS(app, resources={
     r"/*": {
-        "origins": [
-            "https://vetai-project.vercel.app",
-            "https://vetai-project-frontend.vercel.app",
-            "http://localhost:3000"
-        ],
+        "origins": ["*"],  # Allow all origins temporarily for testing
         "methods": ["GET", "POST", "OPTIONS"],
-        "allow_headers": ["Content-Type"]
+        "allow_headers": ["Content-Type", "Authorization", "X-Requested-With", "Accept"],
+        "expose_headers": ["Content-Type"],
+        "max_age": 600
     }
 })
+
+# Add CORS headers to all responses
+@app.after_request
+def after_request(response):
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With,Accept')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
+    return response
 
 # Configure OpenAI
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
