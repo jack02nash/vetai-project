@@ -14,23 +14,28 @@ load_dotenv()
 
 app = Flask(__name__)
 
-# Configure CORS with all necessary headers
+# Configure CORS with specific origins
 CORS(app, resources={
     r"/*": {
-        "origins": ["*"],  # Allow all origins temporarily for testing
+        "origins": [
+            "https://vetai-project-8xgpvpqtz-vetais-projects.vercel.app",
+            "https://vetai-project.vercel.app",
+            "http://localhost:3000"
+        ],
         "methods": ["GET", "POST", "OPTIONS"],
         "allow_headers": ["Content-Type", "Authorization", "X-Requested-With", "Accept"],
         "expose_headers": ["Content-Type"],
-        "max_age": 600
+        "supports_credentials": True
     }
 })
 
 # Add CORS headers to all responses
 @app.after_request
 def after_request(response):
-    response.headers.add('Access-Control-Allow-Origin', '*')
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With,Accept')
-    response.headers.add('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
+    response.headers.add('Access-Control-Allow-Origin', request.headers.get('Origin', '*'))
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+    response.headers.add('Access-Control-Allow-Credentials', 'true')
     return response
 
 # Configure OpenAI
